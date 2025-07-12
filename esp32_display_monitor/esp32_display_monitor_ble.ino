@@ -10,6 +10,22 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 int cpu = 0, ram = 0, disk = 0, net = 0;
 String jsonStr = "";
+volatile bool bleConnected = false;
+
+// BLE Server Callbacks for connection state
+class MyServerCallbacks : public NimBLEServerCallbacks {
+  void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override {
+    bleConnected = true;
+    Serial.println("BLE client connected (server callback)");
+  }
+  void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {
+    bleConnected = false;
+    Serial.println("BLE client disconnected (server callback)");
+    NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
+    pAdvertising->start();
+    Serial.println("BLE advertising restarted");
+  }
+};
 
 // BLE UUIDs (same as Python)
 #define SERVICE_UUID        "12345678-1234-1234-1234-123456789abc"
@@ -47,6 +63,13 @@ class StatsCallbacks : public NimBLECharacteristicCallbacks {
 
   void onStatus(NimBLECharacteristic* pCharacteristic, int code) override {
     Serial.printf("🛠 Status update: %d\n", code);
+    if (code == 0) { // 0 = connected
+      bleConnected = true;
+      Serial.println("BLE client connected");
+    } else if (code == 1) { // 1 = disconnected
+      bleConnected = false;
+      Serial.println("BLE client disconnected");
+    }
   }
 
   void onSubscribe(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo, uint16_t subValue) override {
@@ -84,6 +107,7 @@ void setup() {
     // BLE Init
     NimBLEDevice::init("ESP32-PC-STATS-BLE");
     NimBLEServer* pServer = NimBLEDevice::createServer();
+    pServer->setCallbacks(new MyServerCallbacks());
     NimBLEService* pService = pServer->createService(SERVICE_UUID);
 
     NimBLECharacteristic* pCharacteristic = pService->createCharacteristic(
@@ -104,10 +128,17 @@ void setup() {
 // === Main Loop ===
 void loop() {
     display.clearDisplay();
-    drawBar("CPU", 0, cpu);
-    drawBar("RAM", 16, ram);
-    drawBar("DISK", 32, disk);
-    drawBar("NET", 48, net);
+    if (bleConnected) {
+        drawBar("CPU", 0, cpu);
+        drawBar("RAM", 16, ram);
+        drawBar("DISK", 32, disk);
+        drawBar("NET", 48, net);
+    } else {
+        display.setTextSize(2);
+        display.setCursor(10, 28);
+        display.print("Disconnected");
+        display.setTextSize(1);
+    }
     display.display();
     delay(300);
 }

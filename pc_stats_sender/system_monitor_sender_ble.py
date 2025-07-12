@@ -74,17 +74,22 @@ async def main():
         sys.exit(1)
     print(f"Found device: {target.name} [{target.address}]")
 
-    async with BleakClient(target.address) as client:
-        print("Connected to ESP32 BLE!")
-        while True:
-            stats = await get_stats()
-            json_data = json.dumps(stats) + '\n'
-            try:
-                await client.write_gatt_char(CHARACTERISTIC_UUID, json_data.encode('utf-8'))
-                print(f"Sent: {json_data.strip()}")
-            except Exception as e:
-                print(f"BLE write error: {e}", file=sys.stderr)
-                break
+    while True:
+        try:
+            async with BleakClient(target.address) as client:
+                print("Connected to ESP32 BLE!")
+                while True:
+                    stats = await get_stats()
+                    json_data = json.dumps(stats) + '\n'
+                    try:
+                        await client.write_gatt_char(CHARACTERISTIC_UUID, json_data.encode('utf-8'))
+                        print(f"Sent: {json_data.strip()}")
+                    except Exception as e:
+                        print(f"BLE write error: {e}", file=sys.stderr)
+                        raise e
+        except Exception as e:
+            print("BLE disconnected or error, retrying in 2s...", file=sys.stderr)
+            time.sleep(2)
 
 if __name__ == "__main__":
     try:
