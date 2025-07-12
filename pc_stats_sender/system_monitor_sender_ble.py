@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 
 import psutil
-import serial
 import time
 import json
 import sys
+import asyncio
+from bleak import BleakClient, BleakScanner
 
-SERIAL_PORT = '/dev/cu.usbmodem2101'  # Update as per your port
-BAUD_RATE = 115200
+SERVICE_UUID = "12345678-1234-1234-1234-123456789abc"
+CHARACTERISTIC_UUID = "abcdefab-1234-1234-1234-abcdefabcdef"
 HDD_MOUNTPOINT = '/'
+DEVICE_NAME = "ESP32-PC-STATS-BLE"
 
-def get_stats():
+async def get_stats():
     """
     Collect system stats: CPU, RAM, HDD, and Network usage.
     Returns a dictionary with integer values for each stat.
@@ -56,38 +58,37 @@ def get_stats():
         "net": int(net)
     }
 
-def main():
+async def main():
     """
-    Main loop: open serial port and send system stats as JSON.
+    Main loop: scan for ESP32 BLE device and send system stats as JSON.
     """
-    try:
-        ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
-    except serial.SerialException as e:
-        print(f"Serial connection error: {e}", file=sys.stderr)
-        sys.exit(1)
-    except Exception as e:
-        print(f"Unexpected error opening serial port: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    time.sleep(2)  # Wait for serial connection to stabilize
-
-    while True:
-        try:
-            stats = get_stats()
-            json_data = json.dumps(stats)
-            ser.write((json_data + '\n').encode('utf-8'))
-            print(f"Sent: {json_data}")
-        except serial.SerialException as e:
-            print(f"Serial write error: {e}", file=sys.stderr)
+    print("Scanning for ESP32 BLE device...")
+    devices = await BleakScanner.discover(timeout=5.0)
+    target = None
+    for d in devices:
+        if d.name and DEVICE_NAME in d.name:
+            target = d
             break
-        except Exception as e:
-            print(f"Unexpected error: {e}", file=sys.stderr)
-            break
+    if not target:
+        print("ESP32 BLE device not found.", file=sys.stderr)
+        sys.exit(1)
+    print(f"Found device: {target.name} [{target.address}]")
 
+    async with BleakClient(target.address) as client:
+        print("Connected to ESP32 BLE!")
+        while True:
+            stats = await get_stats()
+            json_data = json.dumps(stats) + '\n'
+            try:
+                await client.write_gatt_char(CHARACTERISTIC_UUID, json_data.encode('utf-8'))
+                print(f"Sent: {json_data.strip()}")
+            except Exception as e:
+                print(f"BLE write error: {e}", file=sys.stderr)
+                break
 
 if __name__ == "__main__":
     try:
-        main()
+        asyncio.run(main())
     except KeyboardInterrupt:
         print("Exiting...")
     except Exception as e:
